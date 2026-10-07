@@ -1,0 +1,29 @@
+[package]
+name        = "tipscan"
+version     = "0.1.0"
+edition     = "2024"
+description = "Crawls a Logos blockchain network with chainsync GetTip and builds the network-wide block tree"
+publish     = false
+
+[dependencies]
+# Wire types come from the node's own crates so the encoding matches exactly.
+# Pinned to the commit the 0.3.0 testnet runs; bump `rev` for other networks.
+lb-binary-codec       = { package = "logos-blockchain-binary-codec", git = "https://github.com/logos-blockchain/logos-blockchain", rev = "3f31a9d4e1e04df11e584f0e561084113f712ff8" }
+lb-core               = { package = "logos-blockchain-core", git = "https://github.com/logos-blockchain/logos-blockchain", rev = "3f31a9d4e1e04df11e584f0e561084113f712ff8" }
+lb-cryptarchia-sync   = { package = "logos-blockchain-cryptarchia-sync", git = "https://github.com/logos-blockchain/logos-blockchain", rev = "3f31a9d4e1e04df11e584f0e561084113f712ff8" }
+
+anyhow             = "1"
+axum               = { version = "0.7.5", default-features = false, features = ["http1", "json", "query", "tokio"] }
+bytes              = { version = "1", features = ["serde"] }
+clap               = { version = "4", features = ["derive", "env", "std", "help", "usage"] }
+futures            = "0.3.32"
+hex                = "0.4"
+libp2p             = { version = "0.56", default-features = false, features = ["dns", "ed25519", "identify", "kad", "macros", "quic", "tokio"] }
+libp2p-stream      = "0.4.0-alpha"
+rand               = "0.8"
+rusqlite           = { version = "0.35", features = ["bundled"] }
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+tokio              = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

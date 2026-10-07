@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Tip Scan</title>
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --ink: #1c1c1e; --muted: #6a6a70; --line: #dcdcd5; --grid: #ebebe4;
+  --edge: #a3a39c; --main: #3d4f63; --stale: #b9b9b2; --accent: #2a78d6; --sel: #e8810c;
+  --warn-bg: #fff3d4; --warn-ink: #7a5300; --bad-bg: #fde2df; --bad-ink: #8f1d17; --ok: #2e8540;
+  --b0: #d6336c; --b1: #1f9e5a; --b2: #8e44ad; --b3: #0f9b9b; --b4: #c27c0e; --b5: #5c6bc0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131315; --panel: #1c1c1f; --ink: #ececee; --muted: #9a9aa3; --line: #2f2f35; --grid: #222226;
+    --edge: #5f5f67; --main: #b9c6d6; --stale: #4c4c53; --accent: #5aa2ff; --sel: #ffa040;
+    --warn-bg: #3a2f10; --warn-ink: #f2c55c; --bad-bg: #3d1614; --bad-ink: #ff8f87; --ok: #4fc26f;
+    --b0: #ff6b9a; --b1: #3fd17f; --b2: #c07ae0; --b3: #3cd0d0; --b4: #f0b040; --b5: #8f9bff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131315; --panel: #1c1c1f; --ink: #ececee; --muted: #9a9aa3; --line: #2f2f35; --grid: #222226;
+  --edge: #5f5f67; --main: #b9c6d6; --stale: #4c4c53; --accent: #5aa2ff; --sel: #ffa040;
+  --warn-bg: #3a2f10; --warn-ink: #f2c55c; --bad-bg: #3d1614; --bad-ink: #ff8f87; --ok: #4fc26f;
+  --b0: #ff6b9a; --b1: #3fd17f; --b2: #c07ae0; --b3: #3cd0d0; --b4: #f0b040; --b5: #8f9bff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
+header { display: flex; align-items: center; gap: 10px 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.ctl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.ctl label { color: var(--muted); display: flex; gap: 5px; align-items: center; }
+select, button, input[type=search] { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+button { cursor: pointer; }
+#scrub { display: flex; align-items: center; gap: 10px; padding: 6px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+#scrub input[type=range] { flex: 1; min-width: 160px; accent-color: var(--accent); }
+#scrubLabel { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 220px; }
+#banner { display: none; padding: 6px 16px; font-weight: 500; }
+#banner.warn { display: block; background: var(--warn-bg); color: var(--warn-ink); }
+#banner.bad { display: block; background: var(--bad-bg); color: var(--bad-ink); }
+main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+#stage { position: relative; min-width: 0; min-height: 0; }
+/* Only the tree canvas fills the stage; panel canvases stay in flow. */
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#cv.drag { cursor: grabbing; }
+#tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+       padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 2; }
+aside { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; padding: 8px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.pane { overflow: auto; padding: 10px 12px; min-height: 0; display: none; }
+.pane.on { display: block; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 4px 4px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+td { padding: 3px 4px; border-bottom: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--grid); }
+tr.sel td { background: var(--grid); font-weight: 600; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+code { word-break: break-all; cursor: copy; }
+.kv div { padding: 2px 0; }
+.kv .k { color: var(--muted); display: inline-block; min-width: 98px; }
+.stat { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted); }
+.stat b { color: var(--ink); font-weight: 600; }
+.bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.radar { position: relative; margin-top: 10px; }
+.radar canvas { position: static; display: block; width: 100%; cursor: crosshair; }
+.radar .rtip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+               padding: 5px 7px; font-size: 11px; display: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 11px; margin-top: 4px; }
+#overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 10; }
+#overlay.on { display: flex; }
+#overlay .box { background: var(--panel); border-radius: 10px; padding: 12px 14px; width: min(92vw, 92vh, 900px); }
+#overlay .box .radar { margin-top: 6px; }
+@media (max-width: 820px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 1fr 45%; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  #scrubLabel { min-width: 0; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Network tip scan</h1>
+  <span id="status" class="muted">connecting…</span>
+  <div class="ctl">
+    <label>window <select id="hours">
+      <option value="0.5">30 min</option><option value="1">1 h</option><option value="3" selected>3 h</option>
+      <option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select></label>
+    <label><input type="checkbox" id="follow" checked> follow tip</label>
+    <button id="fit">fit</button>
+    <button id="theme" title="toggle theme">◐</button>
+  </div>
+</header>
+<div>
+  <div id="scrub">
+    <button id="live">● live</button>
+    <input type="range" id="scan" min="0" max="0" value="0" aria-label="scan">
+    <span id="scrubLabel"></span>
+  </div>
+  <div id="banner"></div>
+</div>
+<main>
+  <div id="stage"><canvas id="cv"></canvas><div id="tip"></div></div>
+  <aside>
+    <div class="tabs">
+      <button data-tab="tips" class="on">Tips</button>
+      <button data-tab="peers">Peers</button>
+      <button data-tab="block">Block</button>
+    </div>
+    <div id="pane-tips" class="pane on"></div>
+    <div id="pane-peers" class="pane">
+      <input type="search" id="peerSearch" placeholder="filter peer id or agent" style="width:100%;margin-bottom:8px">
+      <div id="peerList"></div>
+      <div id="peerDetail"></div>
+    </div>
+    <div id="pane-block" class="pane"><p class="muted">Click a block in the tree.</p></div>
+  </aside>
+</main>
+<div id="overlay"><div class="box">
+  <div style="display:flex;align-items:center;gap:10px"><b id="ovTitle"></b><span id="ovSum" class="muted"></span>
+    <button id="ovClose" style="margin-left:auto">close</button></div>
+  <div class="radar"><canvas id="radarBig"></canvas><div class="rtip"></div></div>
+</div></div>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const short = id => id ? id.slice(0, 10) : '—';
+const speer = p => p ? '…' + p.slice(-8) : '—';
+let G = 0;                                   // genesis ms
+const stime = s => new Date(G + s * 1000);
+const hhmmss = s => stime(s).toISOString().slice(11, 19);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+let data = null, lay = null, scans = [], live = true, peers = [];
+let view = { x0: 0, pps: 0.25, y0: 0 };       // slot at left edge, px per slot, vertical offset
+let hover = null, pinned = null, selTip = null, selPeer = null, drag = null, fitted = false;
+const LANE = 30, R = 4;
+const K_PARAM = 120;   // security parameter k: forks deeper than this are final
+
+try { const t = localStorage.getItem('ts-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$('theme').onclick = () => {
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light');
+  document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('ts-theme', document.documentElement.dataset.theme); } catch (e) {}
+  draw();
+};
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(t) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + t));
+  // A canvas in a hidden pane has no width, so redraw once it is shown.
+  if (t === 'block') drawSpread();
+}
+
+// ------------------------------------------------------------------ layout
+function layout(d) {
+  const by = new Map(d.blocks.map(b => [b.id, b]));
+  const kids = new Map();
+  for (const b of d.blocks) if (by.has(b.parent)) {
+    if (!kids.has(b.parent)) kids.set(b.parent, []);
+    kids.get(b.parent).push(b.id);
+  }
+  // Support: how many peers' current tips sit on or above each block.
+  const support = new Map(), tipAt = new Map();
+  for (const t of d.tips) {
+    tipAt.set(t.tip, t);
+    for (let c = t.tip; by.has(c); c = by.get(c).parent) support.set(c, (support.get(c) || 0) + t.peers.length);
+  }
+  // Reference height: the highest tip that is in our tree. A peer can report
+  // any height (e.g. one on another chain), so unknown tips don't count.
+  const best = Math.max(0, ...d.tips.filter(t => by.has(t.tip)).map(t => by.get(t.tip).height));
+  // Prefer the child with more peer support, then the taller subtree.
+  const sub = new Map();
+  for (const b of [...d.blocks].sort((a, b) => b.height - a.height)) {
+    let h = b.height;
+    for (const k of kids.get(b.id) || []) h = Math.max(h, sub.get(k));
+    sub.set(b.id, h);
+  }
+  const better = (a, b) => (support.get(b) || 0) - (support.get(a) || 0) || sub.get(b) - sub.get(a) || by.get(a).slot - by.get(b).slot;
+  const roots = d.blocks.filter(b => !by.has(b.parent)).map(b => b.id).sort(better);
+  const segs = [], queue = roots.map(id => ({ id, parent: null }));
+  while (queue.length) {
+    const { id, parent } = queue.shift();
+    const seg = { ids: [], parent, rank: parent ? parent.rank + 1 : 0 };
+    for (let c = id; c;) {
+      seg.ids.push(c);
+      const ks = (kids.get(c) || []).slice().sort(better);
+      for (const k of ks.slice(1)) queue.push({ id: k, parent: seg });
+      c = ks[0];
+    }
+    const first = by.get(seg.ids[0]);
+    seg.from = by.has(first.parent) ? by.get(first.parent).slot : first.slot;
+    seg.to = by.get(seg.ids.at(-1)).slot;
+    seg.support = support.get(seg.ids[0]) || 0;
+    segs.push(seg);
+  }
+  const occ = new Map(), PAD = 30;
+  const free = (l, a, b) => !(occ.get(l) || []).some(([x, y]) => a < y + PAD && b + PAD > x);
+  segs.sort((a, b) => a.rank - b.rank || b.support - a.support || b.ids.length - a.ids.length || a.from - b.from);
+  let colorIdx = 0;
+  for (const s of segs) {
+    const base = s.parent ? s.parent.lane : 0;
+    for (let k = s.parent ? 1 : 0; ; k++) {
+      const hit = (k === 0 ? [base] : [base + k, base - k]).find(l => free(l, s.from, s.to));
+      if (hit !== undefined) { s.lane = hit; break; }
+    }
+    if (!occ.has(s.lane)) occ.set(s.lane, []);
+    occ.get(s.lane).push([s.from, s.to]);
+    // Branch colour: main chain neutral; each supported fork gets a palette
+    // colour, inherited by its own sub-branches.
+    s.color = s.rank === 0 || !s.support ? null : (s.parent && s.parent.color) || `--b${colorIdx++ % 6}`;
+  }
+  const pos = new Map();
+  for (const s of segs) for (const id of s.ids) pos.set(id, { slot: by.get(id).slot, lane: s.lane, seg: s });
+  const lanes = [...occ.keys()];
+  return { by, kids, support, tipAt, pos, segs, best,
+           minLane: Math.min(0, ...lanes), maxLane: Math.max(0, ...lanes),
+           minSlot: Math.min(...d.blocks.map(b => b.slot)), maxSlot: Math.max(...d.blocks.map(b => b.slot)) };
+}
+
+const X = s => (s - view.x0) * view.pps;
+const Y = l => cv.clientHeight / 2 + view.y0 + l * LANE;
+const segColor = seg => seg.color ? css(seg.color) : css('--main');
+const peerTip = p => data.tips.find(t => t.peers.includes(p))?.tip || null;
+
+// Is block `id` on the highlighted chain (selected tip, or selected peer's tip)?
+function onSelectedChain(id) {
+  const t = selTip || (selPeer && peerTip(selPeer));
+  if (!t || !lay.by.has(t)) return false;
+  if (lay._selFor !== t) {
+    lay._selSet = new Set(); lay._selFor = t;
+    for (let c = t; lay.by.has(c); c = lay.by.get(c).parent) lay._selSet.add(c);
+  }
+  return lay._selSet.has(id);
+}
+
+function draw() {
+  if (!data || !lay) return;
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = '11px -apple-system, sans-serif';
+
+  // Time grid.
+  const steps = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200];
+  const step = steps.find(s => s * view.pps >= 90) || 43200;
+  ctx.strokeStyle = css('--grid'); ctx.fillStyle = css('--muted'); ctx.lineWidth = 1;
+  for (let s = Math.ceil(view.x0 / step) * step; s < view.x0 + W / view.pps; s += step) {
+    const x = Math.round(X(s)) + .5;
+    ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, H); ctx.stroke();
+    const t = stime(s).toISOString();
+    ctx.fillText(step >= 3600 ? t.slice(5, 16).replace('T', ' ') : t.slice(11, 19), x + 3, 12);
+  }
+  const xs = X(data.scan_slot);
+  ctx.strokeStyle = css('--accent'); ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(xs, 18); ctx.lineTo(xs, H); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = css('--accent'); ctx.fillText(live ? 'latest scan' : 'scan time', xs + 3, 28);
+
+  const hasSel = !!(selTip || selPeer);
+  for (const b of data.blocks) {
+    if (!lay.pos.has(b.parent)) continue;
+    const p = lay.pos.get(b.parent), c = lay.pos.get(b.id);
+    const x1 = X(p.slot), y1 = Y(p.lane), x2 = X(c.slot), y2 = Y(c.lane);
+    if (Math.max(x1, x2) < -20 || Math.min(x1, x2) > W + 20) continue;
+    const sel = hasSel && onSelectedChain(b.id), sup = lay.support.get(b.id) || 0;
+    ctx.strokeStyle = sel ? css('--sel') : sup ? segColor(c.seg) : css('--stale');
+    // Edge width grows with the number of peers on the chain.
+    ctx.lineWidth = sel ? 3 : sup ? 1.2 + Math.min(3.5, Math.log10(sup + 1) * 1.6) : 1;
+    ctx.globalAlpha = hasSel && !sel ? 0.35 : 1;
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    if (y1 !== y2) ctx.lineTo(Math.min(x2, x1 + 10), y2);
+    ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  for (const b of data.blocks) {
+    const p = lay.pos.get(b.id), x = X(p.slot), y = Y(p.lane);
+    if (x < -10 || x > W + 10 || y < -10 || y > H + 10) continue;
+    const sup = lay.support.get(b.id) || 0, sel = hasSel && onSelectedChain(b.id);
+    ctx.globalAlpha = hasSel && !sel ? 0.35 : 1;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 7);
+    if (sup) { ctx.fillStyle = sel ? css('--sel') : segColor(p.seg); ctx.fill(); }
+    else { ctx.strokeStyle = css('--stale'); ctx.lineWidth = 1.2; ctx.stroke(); }
+    if (b.id === pinned || b.id === hover) {
+      ctx.strokeStyle = css('--ink'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, R + 3, 0, 7); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  // Tip badges with the number of peers at each tip. Tips on one lane whose
+  // badges would overlap at this zoom (e.g. a scan that straddled a new block
+  // splits the main chain's peers across tip and tip-1) merge into one badge
+  // with the total, drawn at the newest of them.
+  const badge = n => `${n} peer${n === 1 ? '' : 's'}`;
+  const byLane = new Map();
+  for (const t of data.tips) {
+    if (!lay.pos.has(t.tip)) continue;
+    const p = lay.pos.get(t.tip);
+    if (!byLane.has(p.lane)) byLane.set(p.lane, []);
+    byLane.get(p.lane).push({ t, p, x: X(p.slot) });
+  }
+  for (const items of byLane.values()) {
+    items.sort((a, b) => a.x - b.x);
+    const groups = [];
+    for (const it of items) {
+      const g = groups.at(-1);
+      // Overlap if this tip lies within the previous group's badge width.
+      if (g && it.x - g.x0 < ctx.measureText(badge(g.n) + ' · 9 tips · depth 999 (final)').width + 16) {
+        g.items.push(it); g.n += it.t.peers.length;
+      } else groups.push({ x0: it.x, n: it.t.peers.length, items: [it] });
+    }
+    for (const g of groups) {
+      const last = g.items.at(-1), x = last.x, y = Y(last.p.lane);
+      if (x < -60 || g.x0 > W + 10) continue;
+      // Fork depth: how far the group's deepest tip is past its common
+      // ancestor with the main chain. Past k=120 the fork is permanent.
+      const depth = Math.max(0, ...g.items.map(({ t }) => forkInfo(t.tip)?.branch ?? 0));
+      const label = (g.items.length > 1 ? `${badge(g.n)} · ${g.items.length} tips` : badge(g.n))
+        + (depth ? ` · depth ${depth}${depth > K_PARAM ? ' (final)' : ''}` : '');
+      const w = ctx.measureText(label).width + 10;
+      const sel = g.items.some(({ t }) => selTip === t.tip || (selPeer && t.peers.includes(selPeer)));
+      const lead = g.items.reduce((a, b) => (b.t.peers.length > a.t.peers.length ? b : a));
+      ctx.fillStyle = sel ? css('--sel') : segColor(lead.p.seg);
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x + 7, y - 17, w, 14, 7) : ctx.rect(x + 7, y - 17, w, 14); ctx.fill();
+      ctx.fillStyle = css('--bg'); ctx.fillText(label, x + 12, y - 6);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ panels
+let mainSet = null;
+function forkInfo(tip) {
+  // Where a tip sits relative to the main (most-supported) chain.
+  if (!mainSet) {
+    mainSet = new Set();
+    for (let c = data.tips[0]?.tip; c && lay.by.has(c); c = lay.by.get(c).parent) mainSet.add(c);
+  }
+  if (!lay.by.has(tip)) return null;
+  if (mainSet.has(tip)) return { onMain: true };
+  let c = tip;
+  while (lay.by.has(c) && !mainSet.has(c)) c = lay.by.get(c).parent;
+  if (!lay.by.has(c)) return { onMain: false };
+  const f = lay.by.get(c);
+  return { onMain: false, forkHeight: f.height, forkSlot: f.slot, branch: lay.by.get(tip).height - f.height };
+}
+
+function renderTips() {
+  const ok = data.tips.reduce((n, t) => n + t.peers.length, 0);
+  const errN = Object.values(data.errors).reduce((n, v) => n + v.length, 0);
+  const rows = data.tips.map(t => {
+    const f = forkInfo(t.tip), lag = lay.best - (t.height || 0);
+    const p = lay.pos.get(t.tip), col = p ? segColor(p.seg) : css('--stale');
+    const where = !t.known ? '<span class="muted">not in tree</span>'
+      : f?.onMain ? (lag ? `main, ${lag} behind` : '<b>main tip</b>')
+      : f?.forkHeight != null ? `fork @h${f.forkHeight} ${hhmmss(f.forkSlot)}, depth ${f.branch}${f.branch > K_PARAM ? ' <b>(permanent)</b>' : ''}` : 'fork';
+    return `<tr class="click ${selTip === t.tip ? 'sel' : ''}" data-tip="${t.tip}">
+      <td><span class="sw" style="background:${col}"></span><span class="mono">${short(t.tip)}</span></td>
+      <td>${t.height ?? '—'}</td><td>${t.peers.length}</td><td>${where}</td></tr>`;
+  }).join('');
+  const errs = Object.entries(data.errors)
+    .map(([e, ps]) => `<tr><td colspan="2" class="muted">${esc(e || 'error')}</td><td>${ps.length}</td><td></td></tr>`).join('');
+  const sel = selTip && data.tips.find(t => t.tip === selTip);
+  $('pane-tips').innerHTML = `
+    <div class="stat"><span><b>${ok}</b> peers answered</span><span><b>${errN}</b> failed</span><span><b>${data.tips.length}</b> distinct tips</span></div>
+    <table><thead><tr><th>tip</th><th>height</th><th>peers</th><th>where</th></tr></thead><tbody>${rows}${errs}</tbody></table>
+    ${sel ? `<h4 style="margin:12px 0 6px">${sel.peers.length} peers on ${short(sel.tip)}</h4>
+      <div class="mono">${sel.peers.map(p => `<div data-peer="${p}" style="cursor:pointer">${p}</div>`).join('')}</div>` : ''}`;
+  $('pane-tips').querySelectorAll('tr[data-tip]').forEach(tr => tr.onclick = () => {
+    selTip = selTip === tr.dataset.tip ? null : tr.dataset.tip; selPeer = null;
+    renderTips(); draw();
+  });
+  $('pane-tips').querySelectorAll('[data-peer]').forEach(el => el.onclick = () => selectPeer(el.dataset.peer));
+}
+
+async function loadPeers() {
+  try { peers = await (await fetch('/api/peers', { cache: 'no-store' })).json(); } catch (e) { peers = []; }
+  renderPeers();
+}
+function renderPeers() {
+  if (!data) return;
+  const q = $('peerSearch').value.trim().toLowerCase();
+  const tipOf = new Map();
+  for (const t of data.tips) for (const p of t.peers) tipOf.set(p, t);
+  const list = peers.filter(p => !q || p.peer.toLowerCase().includes(q) || (p.agent || '').toLowerCase().includes(q))
+    .sort((a, b) => (b.last?.height || 0) - (a.last?.height || 0));
+  $('peerList').innerHTML = `<div class="muted" style="margin-bottom:4px">${list.length} of ${peers.length} peers known${list.length > 300 ? ' (showing 300)' : ''}</div>
+    <table><thead><tr><th>peer</th><th>height</th><th>in this scan</th></tr></thead><tbody>${
+    list.slice(0, 300).map(p => {
+      const t = tipOf.get(p.peer), lag = t ? lay.best - (t.height || 0) : null;
+      const f = t && forkInfo(t.tip);
+      const st = t ? (f && !f.onMain ? 'on a fork' : lag ? `${lag} behind` : 'at tip')
+        : (data.errors && Object.entries(data.errors).find(([, ps]) => ps.includes(p.peer))?.[0]) || 'not queried';
+      return `<tr class="click ${selPeer === p.peer ? 'sel' : ''}" data-peer="${p.peer}"><td class="mono" title="${p.peer}">${speer(p.peer)}</td>
+        <td>${t?.height ?? p.last?.height ?? '—'}</td><td>${esc(st)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  $('peerList').querySelectorAll('tr[data-peer]').forEach(tr => tr.onclick = () => selectPeer(tr.dataset.peer));
+}
+$('peerSearch').oninput = renderPeers;
+
+async function selectPeer(p) {
+  selPeer = selPeer === p ? null : p; selTip = null;
+  showTab('peers'); renderPeers(); renderTips(); draw();
+  if (!selPeer) { $('peerDetail').innerHTML = ''; return; }
+  const info = peers.find(x => x.peer === p) || {};
+  let hist = [];
+  try { hist = await (await fetch('/api/peer/' + encodeURIComponent(p), { cache: 'no-store' })).json(); } catch (e) {}
+  // Collapse consecutive scans with the same answer into runs.
+  const runs = [];
+  for (const o of hist.slice().reverse()) {
+    const key = o.tip || 'err:' + (o.err || '');
+    if (runs.length && runs.at(-1).key === key) { runs.at(-1).to = o.t; runs.at(-1).n++; }
+    else runs.push({ key, tip: o.tip, height: o.height, err: o.err, from: o.t, to: o.t, n: 1 });
+  }
+  const hm = t => new Date(t).toISOString().slice(11, 16);
+  $('peerDetail').innerHTML = `<h4 style="margin:12px 0 6px">Peer</h4>
+    <div class="kv"><div><code data-copy="${p}">${p}</code></div>
+      <div><span class="k">agent</span>${esc(info.agent || '—')}</div>
+      <div><span class="k">addresses</span><span class="mono">${(info.addrs || []).map(esc).join('<br>') || '—'}</span></div>
+      <div><span class="k">first seen</span>${info.first_seen ? new Date(info.first_seen).toISOString().slice(0, 16).replace('T', ' ') + 'Z' : '—'}</div></div>
+    <h4 style="margin:12px 0 6px">Tip history (${hist.length} scans)</h4>
+    <table><thead><tr><th>from</th><th>to</th><th>scans</th><th>tip</th><th>height</th></tr></thead><tbody>${
+      runs.reverse().slice(0, 150).map(r => `<tr><td>${hm(r.from)}</td><td>${hm(r.to)}</td><td>${r.n}</td>
+        <td class="mono">${r.tip ? short(r.tip) : `<span class="muted">${esc(r.err)}</span>`}</td><td>${r.height ?? ''}</td></tr>`).join('')
+    }</tbody></table>`;
+  $('peerDetail').querySelectorAll('[data-copy]').forEach(c => c.onclick = () => navigator.clipboard?.writeText(c.dataset.copy));
+}
+
+function renderBlock() {
+  const b = pinned && lay.by.get(pinned);
+  if (!b) { $('pane-block').innerHTML = '<p class="muted">Click a block in the tree.</p>'; return; }
+  const sup = lay.support.get(b.id) || 0, tipHere = lay.tipAt.get(b.id);
+  const total = data.tips.reduce((n, t) => n + t.peers.length, 0);
+  const ts = ms => ms ? new Date(ms).toISOString().slice(0, 19).replace('T', ' ') + 'Z' : '—';
+  $('pane-block').innerHTML = `<div class="kv">
+    <div><span class="k">id</span><code data-copy="${b.id}">${b.id}</code></div>
+    <div><span class="k">parent</span><code data-copy="${b.parent}">${b.parent || '—'}</code></div>
+    <div><span class="k">height</span>${b.height}</div>
+    <div><span class="k">slot</span>${b.slot} · ${stime(b.slot).toISOString().slice(0, 19).replace('T', ' ')}Z</div>
+    <div><span class="k">transactions</span>${b.txs}</div>
+    <div><span class="k">leader key</span><code data-copy="${b.leader}">${b.leader ? b.leader.slice(0, 20) + '…' : '—'}</code></div>
+    <div><span class="k">first seen</span>${ts(b.first_seen)} from <span class="mono">${speer(b.first_peer)}</span></div>
+    <div><span class="k">peer support</span>${sup} of ${total} answering peers have it on their chain</div>
+    <div class="bar"><i style="width:${total ? 100 * sup / total : 0}%"></i></div>
+    ${tipHere ? `<div style="margin-top:6px"><span class="k">tip of</span>${tipHere.peers.length} peers</div>` : ''}
+    <div><span class="k">children</span>${(lay.kids.get(b.id) || []).length}</div></div>
+    <h4 style="margin:14px 0 2px;display:flex;align-items:center">Dissemination
+      <button id="enlarge" style="margin-left:auto;font-size:11px;padding:1px 7px">enlarge</button></h4>
+    <div id="spreadSum" class="muted">loading…</div>
+    <div class="radar"><canvas id="radar"></canvas><div class="rtip"></div></div>
+    <div class="legend"><span><span class="sw" style="background:${css('--ok')}"></span>≤ 2 s</span>
+      <span><span class="sw" style="background:${css('--b4')}"></span>≤ 8 s</span>
+      <span><span class="sw" style="background:${css('--b0')}"></span>slower</span>
+      <span><span class="sw" style="border:1.5px solid ${css('--stale')};width:8px;height:8px"></span>not seen with it</span></div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Rings: seconds after the block's slot. Each line spans the last
+      scan the peer lacked the block to the first it had it. Peers are ordered around the circle by IP.</div>
+    <canvas id="cdf" style="width:100%;height:150px;display:block;margin-top:8px"></canvas>`;
+  $('pane-block').querySelectorAll('[data-copy]').forEach(c => c.onclick = () => navigator.clipboard?.writeText(c.dataset.copy));
+  $('enlarge').onclick = () => { $('overlay').classList.add('on'); drawSpread(); };
+  attachRadarHover($('radar'));
+  loadSpread(b.id);
+}
+
+// ---------------------------------------------------- block dissemination
+let spread = null, spreadAt = 0;
+async function loadSpread(id) {
+  const fresh = spread && spread.block.id === id;
+  const young = fresh && Date.now() - spread.slot_ms < (spread.window_s + 30) * 1000;
+  // Refetch while the block is still spreading; otherwise reuse.
+  if (!fresh || (young && Date.now() - spreadAt > 4000)) {
+    try {
+      const r = await fetch(`/api/block/${id}/spread?window=300`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      spread = await r.json(); spreadAt = Date.now();
+    } catch (e) { $('spreadSum') && ($('spreadSum').textContent = 'no data: ' + e.message); return; }
+  }
+  if (pinned === id) drawSpread();
+}
+const delayOf = (p, k) => p[k] == null ? null : (p[k] - spread.slot_ms) / 1000;
+function quantile(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : null; }
+function spreadStats() {
+  const n = spread.peers.length;
+  const upper = spread.peers.map(p => delayOf(p, 'first_with') ?? Infinity).sort((a, b) => a - b);
+  const lower = spread.peers.map(p => p.first_with == null ? Infinity : (delayOf(p, 'last_without') ?? 0)).sort((a, b) => a - b);
+  const fmt = v => v === Infinity || v == null ? '—' : v < 10 ? v.toFixed(1) + 's' : Math.round(v) + 's';
+  const got = spread.peers.filter(p => p.first_with != null).length;
+  const at = q => `${fmt(quantile(lower, q))}–${fmt(quantile(upper, q))}`;
+  return { n, got, text: `${got}/${n} peers seen with it · 50% between ${at(0.5)} · 90% ${at(0.9)} · 99% ${at(0.99)}` };
+}
+const ipNum = ip => {
+  if (!ip) return Infinity;
+  const m = ip.split('.');
+  return m.length === 4 ? m.reduce((a, x) => a * 256 + (+x), 0) : 5e9 + ip.length;
+};
+const delayColor = d => d == null ? null : d <= 2 ? css('--ok') : d <= 8 ? css('--b4') : css('--b0');
+
+function drawSpread() {
+  if (!spread || !pinned || spread.block.id !== pinned) return;
+  const st = spreadStats();
+  if ($('spreadSum')) $('spreadSum').textContent = st.text;
+  $('ovTitle').textContent = `Block ${short(spread.block.id)} · h${spread.block.height}`;
+  $('ovSum').textContent = st.text;
+  if ($('radar')) drawRadar($('radar'));
+  if ($('overlay').classList.contains('on')) drawRadar($('radarBig'));
+  if ($('cdf')) drawCdf($('cdf'));
+}
+
+function drawRadar(c) {
+  const W = c.clientWidth, H = W, dpr = devicePixelRatio || 1;
+  c.style.height = H + 'px';
+  if (c.width !== W * dpr || c.height !== H * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2, R0 = 9, Rmax = W / 2 - 26, Rout = W / 2 - 10, win = spread.window_s;
+  const rOf = d => R0 + (Rmax - R0) * Math.log1p(Math.max(0, d) / 0.5) / Math.log1p(win / 0.5);
+  const big = W > 500;
+  g.font = `${big ? 12 : 10}px -apple-system, sans-serif`;
+  // Rings.
+  for (const t of [1, 2, 4, 8, 16, 32, 64, 128, 256].filter(t => t <= win)) {
+    const r = rOf(t);
+    g.strokeStyle = css('--grid'); g.lineWidth = 1;
+    g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke();
+    g.fillStyle = css('--muted'); g.fillText(`${t}s`, cx + 3, cy - r + (big ? 13 : 11));
+  }
+  g.setLineDash([3, 3]); g.strokeStyle = css('--stale');
+  g.beginPath(); g.arc(cx, cy, Rout, 0, 7); g.stroke(); g.setLineDash([]);
+  // Centre: the block.
+  g.fillStyle = css('--main'); g.beginPath(); g.arc(cx, cy, 5, 0, 7); g.fill();
+  // Peers, ordered by IP so hosting fleets sit together.
+  const ps = spread.peers.slice().sort((a, b) => ipNum(a.ip) - ipNum(b.ip) || (a.peer < b.peer ? -1 : 1));
+  const n = ps.length, dot = big ? 3.2 : 2.3;
+  c._pts = [];
+  ps.forEach((p, i) => {
+    const ang = -Math.PI / 2 + 2 * Math.PI * i / n, ca = Math.cos(ang), sa = Math.sin(ang);
+    const hi = delayOf(p, 'first_with'), lo = p.first_with == null ? null : (delayOf(p, 'last_without') ?? 0);
+    const sel = selPeer === p.peer;
+    if (hi == null) {
+      const x = cx + Rout * ca, y = cy + Rout * sa;
+      g.strokeStyle = sel ? css('--sel') : css('--stale'); g.lineWidth = 1.2;
+      g.beginPath(); g.arc(x, y, dot, 0, 7); g.stroke();
+      c._pts.push({ x, y, p });
+      return;
+    }
+    const col = sel ? css('--sel') : delayColor(hi);
+    const r1 = rOf(lo), r2 = rOf(hi);
+    g.strokeStyle = col; g.globalAlpha = 0.35; g.lineWidth = big ? 1.4 : 1;
+    g.beginPath(); g.moveTo(cx + r1 * ca, cy + r1 * sa); g.lineTo(cx + r2 * ca, cy + r2 * sa); g.stroke();
+    g.globalAlpha = 1; g.fillStyle = col;
+    const x = cx + r2 * ca, y = cy + r2 * sa;
+    g.beginPath(); g.arc(x, y, sel ? dot + 2 : dot, 0, 7); g.fill();
+    c._pts.push({ x, y, p });
+  });
+}
+
+function attachRadarHover(c) {
+  const tipEl = c.parentElement.querySelector('.rtip');
+  c.onmousemove = e => {
+    if (!c._pts) return;
+    const r = c.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    let best = null, bd = 64;
+    for (const q of c._pts) { const d = (q.x - mx) ** 2 + (q.y - my) ** 2; if (d < bd) { bd = d; best = q; } }
+    if (!best) { tipEl.style.display = 'none'; return; }
+    const p = best.p, hi = delayOf(p, 'first_with'), lo = delayOf(p, 'last_without');
+    tipEl.innerHTML = `<b class="mono">${speer(p.peer)}</b> ${esc(p.ip || '')}<br>` +
+      (hi == null ? `not seen with the block (${p.seen} obs)` :
+        `has it by +${hi.toFixed(1)}s` + (lo != null ? ` (lacked it at +${lo.toFixed(1)}s)` : ' (first observation)'));
+    tipEl.style.display = 'block';
+    tipEl.style.left = Math.min(mx + 12, c.clientWidth - tipEl.offsetWidth - 2) + 'px';
+    tipEl.style.top = (my + 12) + 'px';
+  };
+  c.onmouseleave = () => { tipEl.style.display = 'none'; };
+  c.onclick = e => {
+    const r = c.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const best = (c._pts || []).find(q => (q.x - mx) ** 2 + (q.y - my) ** 2 < 64);
+    if (best) { $('overlay').classList.remove('on'); selectPeer(best.p.peer); }
+  };
+}
+attachRadarHover($('radarBig'));
+$('ovClose').onclick = () => $('overlay').classList.remove('on');
+$('overlay').onclick = e => { if (e.target === $('overlay')) $('overlay').classList.remove('on'); };
+
+// Per-block cumulative curve: the true curve lies between "has it for sure"
+// (first observation with it) and "could have it" (last observation without).
+function drawCdf(c) {
+  const W = c.clientWidth, H = c.clientHeight, dpr = devicePixelRatio || 1;
+  if (c.width !== W * dpr || c.height !== H * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const L = 30, B = 18, T = 6, win = spread.window_s, n = spread.peers.length || 1;
+  const xOf = d => L + (W - L - 6) * Math.log1p(Math.max(0, d) / 0.5) / Math.log1p(win / 0.5);
+  const yOf = f => T + (H - T - B) * (1 - f);
+  g.font = '10px -apple-system, sans-serif'; g.fillStyle = css('--muted'); g.strokeStyle = css('--grid'); g.lineWidth = 1;
+  for (const f of [0, 0.5, 0.9, 1]) { g.beginPath(); g.moveTo(L, yOf(f)); g.lineTo(W - 6, yOf(f)); g.stroke(); g.fillText(`${f * 100}%`, 2, yOf(f) + 3); }
+  for (const t of [1, 2, 4, 8, 16, 32, 64, 128, 256].filter(t => t <= win)) {
+    g.beginPath(); g.moveTo(xOf(t), T); g.lineTo(xOf(t), H - B); g.stroke(); g.fillText(`${t}s`, xOf(t) - 6, H - 5);
+  }
+  // Scan times as ticks on the axis.
+  g.strokeStyle = css('--accent');
+  for (const s of spread.scan_times) {
+    const d = (s - spread.slot_ms) / 1000;
+    if (d >= 0 && d <= win) { g.beginPath(); g.moveTo(xOf(d), H - B); g.lineTo(xOf(d), H - B + 4); g.stroke(); }
+  }
+  const step = (vals, color, dash) => {
+    vals = vals.filter(v => v != null && isFinite(v)).sort((a, b) => a - b);
+    g.strokeStyle = color; g.lineWidth = 1.8; g.setLineDash(dash);
+    g.beginPath(); g.moveTo(L, yOf(0));
+    vals.forEach((v, i) => { g.lineTo(xOf(v), yOf(i / n)); g.lineTo(xOf(v), yOf((i + 1) / n)); });
+    g.lineTo(W - 6, yOf(vals.length / n)); g.stroke(); g.setLineDash([]);
+  };
+  step(spread.peers.map(p => p.first_with == null ? null : (delayOf(p, 'last_without') ?? 0)), css('--muted'), [4, 3]);
+  step(spread.peers.map(p => delayOf(p, 'first_with')), css('--accent'), []);
+  g.fillStyle = css('--accent'); g.fillText('has it (observed)', W - 100, T + 22);
+  g.fillStyle = css('--muted'); g.fillText('could have it', W - 100, T + 34);
+}
+
+function renderBanner() {
+  const el = $('banner');
+  const total = data.tips.reduce((n, t) => n + t.peers.length, 0);
+  // Group fork tips by their fork point (LCA with the main chain). A fork is
+  // permanent once its own branch is more than k blocks past that LCA: its
+  // peers have finalized beyond the point where they could reorg back.
+  const groups = new Map();
+  for (const t of data.tips) {
+    const f = t.known && forkInfo(t.tip);
+    if (!f || f.onMain || f.forkHeight == null) continue;
+    const key = f.forkHeight + ':' + f.forkSlot;
+    const g = groups.get(key) || { forkHeight: f.forkHeight, forkSlot: f.forkSlot, peers: 0, depth: 0, tips: 0 };
+    g.peers += t.peers.length; g.depth = Math.max(g.depth, f.branch); g.tips++;
+    groups.set(key, g);
+  }
+  const all = [...groups.values()].sort((a, b) => b.depth - a.depth);
+  const permanent = all.filter(g => g.depth > K_PARAM), shallow = all.filter(g => g.depth <= K_PARAM);
+  const sum = gs => gs.reduce((n, g) => n + g.peers, 0);
+  const desc = g => `${g.peers} peer${g.peers > 1 ? 's' : ''} on a fork from h${g.forkHeight} (${hhmmss(g.forkSlot)}Z), depth ${g.depth}`;
+  const unknown = data.tips.filter(t => !t.known).reduce((n, t) => n + t.peers.length, 0);
+  let text = '';
+  if (permanent.length) {
+    el.className = 'bad';
+    text = `${sum(permanent)} of ${total} peers are permanently forked (fork more than k=${K_PARAM} blocks past its common ancestor with the main chain): `
+      + permanent.map(desc).join('; ') + '.';
+    if (shallow.length) text += ` ${sum(shallow)} more on ${shallow.length} recoverable fork${shallow.length > 1 ? 's' : ''} (deepest ${shallow[0].depth}).`;
+  } else if (shallow.length) {
+    el.className = 'warn';
+    text = `${sum(shallow)} peers are on ${shallow.length} recoverable fork${shallow.length > 1 ? 's' : ''} (deepest ${shallow[0].depth} of k=${K_PARAM}).`;
+  } else el.className = '';
+  if (unknown) { text += ` ${unknown} peers report tips not yet in the tree.`; el.className ||= 'warn'; }
+  el.textContent = text;
+}
+
+// ------------------------------------------------------------- interaction
+function hit(mx, my) {
+  let best = null, bd = 90;
+  for (const [id, p] of lay.pos) {
+    const dx = X(p.slot) - mx, dy = Y(p.lane) - my, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = id; }
+  }
+  return best;
+}
+cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, x0: view.x0, y0: view.y0, moved: false }; cv.setPointerCapture(e.pointerId); cv.classList.add('drag'); });
+cv.addEventListener('pointermove', e => {
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { drag.moved = true; $('follow').checked = false; }
+    view.x0 = drag.x0 - dx / view.pps; view.y0 = drag.y0 + dy; draw(); return;
+  }
+  if (!lay) return;
+  const h = hit(mx, my);
+  if (h !== hover) { hover = h; draw(); }
+  const tipEl = $('tip');
+  if (h) {
+    const b = lay.by.get(h), sup = lay.support.get(h) || 0, t = lay.tipAt.get(h);
+    tipEl.innerHTML = `<b class="mono">${short(h)}</b> · h${b.height} · slot ${b.slot}<br>${hhmmss(b.slot)}Z · ${b.txs} tx<br>` +
+      `${sup ? `${sup} peers on this chain` : '<b>no peer on this chain</b>'}${t ? `<br>tip of ${t.peers.length} peers` : ''}`;
+    tipEl.style.display = 'block';
+    tipEl.style.left = Math.min(mx + 14, cv.clientWidth - tipEl.offsetWidth - 4) + 'px';
+    tipEl.style.top = (my + 14) + 'px';
+  } else tipEl.style.display = 'none';
+});
+cv.addEventListener('pointerup', () => {
+  if (drag && !drag.moved && lay) {
+    pinned = hover;
+    // Clicking a block always opens its Block view (details + dissemination);
+    // a tip block also highlights its chain and selects it in the Tips tab.
+    if (hover && lay.tipAt.has(hover)) { selTip = hover; selPeer = null; renderTips(); }
+    renderBlock();
+    if (hover) showTab('block');
+    draw();
+  }
+  drag = null; cv.classList.remove('drag');
+});
+cv.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; hover = null; draw(); });
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    view.x0 += (e.deltaX || e.deltaY) / view.pps; $('follow').checked = false;
+  } else {
+    const s = view.x0 + mx / view.pps;
+    view.pps = Math.min(20, Math.max(0.002, view.pps * Math.exp(-e.deltaY * 0.0015)));
+    view.x0 = s - mx / view.pps;
+  }
+  draw();
+}, { passive: false });
+cv.addEventListener('dblclick', fit);
+$('fit').onclick = fit;
+addEventListener('resize', () => { draw(); drawSpread(); });
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if ($('overlay').classList.contains('on')) { $('overlay').classList.remove('on'); return; }
+  selTip = selPeer = pinned = null; renderTips(); renderPeers(); renderBlock(); draw();
+});
+
+function fit() {
+  if (!lay) return;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  const lo = lay.minSlot, hi = Math.max(lay.maxSlot, data.scan_slot);
+  view.pps = (W - 100) / Math.max(60, hi - lo);
+  view.x0 = lo - 20 / view.pps;
+  view.y0 = (lay.maxLane - lay.minLane + 2) * LANE > H ? 0 : -((lay.minLane + lay.maxLane) / 2) * LANE;
+  draw();
+}
+
+// -------------------------------------------------------------------- data
+async function loadScans() {
+  try { scans = await (await fetch(`/api/scans?hours=${Math.max(1, +$('hours').value)}`, { cache: 'no-store' })).json(); } catch (e) { scans = []; }
+  const r = $('scan');
+  r.max = Math.max(0, scans.length - 1);
+  if (live) r.value = r.max;
+}
+async function load() {
+  try {
+    const idx = +$('scan').value;
+    const scanQ = !live && scans[idx] ? `&scan=${scans[idx].id}` : '';
+    const d = await (await fetch(`/api/state?hours=${$('hours').value}${scanQ}`, { cache: 'no-store' })).json();
+    G = d.genesis_ms; data = d; lay = layout(d); mainSet = null;
+    if (!fitted) { fit(); fitted = true; }
+    if ($('follow').checked) view.x0 = d.scan_slot - (cv.clientWidth - 90) / view.pps;
+    renderTips(); renderBlock(); renderBanner(); renderPeers(); draw();
+    const s = d.scan;
+    $('scrubLabel').textContent = s
+      ? `scan #${s.id} · ${new Date(s.started).toISOString().slice(0, 19).replace('T', ' ')}Z · ${s.ok}/${s.queried} answered · ${s.tips} tips`
+      : 'no scans yet';
+    $('status').textContent = `${d.blocks.length} blocks shown · ${d.stored_blocks} stored · scan every ${d.interval_s}s`;
+  } catch (e) {
+    $('status').textContent = 'server unreachable: ' + e.message;
+  }
+}
+$('scan').oninput = () => {
+  live = +$('scan').value === +$('scan').max;
+  $('live').style.opacity = live ? 1 : 0.5;
+  load();
+};
+$('live').onclick = () => { live = true; $('live').style.opacity = 1; $('scan').value = $('scan').max; load(); };
+$('hours').onchange = async () => { fitted = false; await loadScans(); load(); };
+
+(async function tick() {
+  await loadScans();
+  if (live || !data) { await load(); loadPeers(); }
+  setTimeout(tick, Math.max(5, (data?.interval_s || 60) / 2) * 1000);
+})();
+})();
+</script>
+</body>
+</html>
